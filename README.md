@@ -1,7 +1,7 @@
 # MatrixFactorization
 The implementation of matrix factorization model
 
-# Description
+### Description
 Matrix factorization (MF) model is now a very popular learning model for recommendation.
 This is my own implementation of matrix factorization with cross validation only.
 
