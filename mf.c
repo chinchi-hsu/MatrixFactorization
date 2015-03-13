@@ -103,6 +103,19 @@ void matrixAssignRandomValues(Matrix *matrix, double minValue, double maxValue){
 	}
 }
 
+double matrixCalculateSquareSum(Matrix *matrix){
+	double squareSum = 0.0;
+
+	for(int row = 0; row < matrix -> rowCount; row ++){
+		for(int column = 0; column < matrix -> columnCount; column ++){
+			double value = matrix -> entries[row][column];
+			squareSum += value * value;
+		}
+	}
+
+	return squareSum;
+}
+
 // Source and target should contain the same rows and columns
 void matrixCopyEntries(Matrix *source, Matrix *target){
 	for(int row = 0; row < source -> rowCount; row ++){
@@ -194,18 +207,16 @@ double matrixFactorizationCalculateCost(MatrixFactorization *model, List *rating
 				int item = ratings -> entries[user][j].key;
 				double trueRating = ratings -> entries[user][j].value;
 				double predictedRating = vectorCalculateDotProduct(userMatrix -> entries[user], itemMatrix -> entries[item], model -> latentFactorCount);
-				totalRatingCost += (trueRating - predictedRating) * (trueRating - predictedRating);
+				double ratingDifference = trueRating - predictedRating;
+				totalRatingCost += ratingDifference * ratingDifference;
 			}
 		}
-		double userRegularizationCost = 0.0;
-		for(int user = 0; user < userMatrix -> columnCount; user ++){
-			userRegularizationCost += vectorCalculateDotProduct(userMatrix -> entries[user], userMatrix -> entries[user], userMatrix -> columnCount);
-		}
-		double itemRegularizationCost = 0.0;
-		for(int item = 0; item < itemMatrix -> columnCount; item ++){
-			itemRegularizationCost += vectorCalculateDotProduct(itemMatrix -> entries[item], itemMatrix -> entries[item], itemMatrix -> columnCount);
-		}
+		
+		double userRegularizationCost = matrixCalculateSquareSum(userMatrix);
+		double itemRegularizationCost = matrixCalculateSquareSum(itemMatrix);
+		
 		return 0.5 * (totalRatingCost + model -> userRegularizationRate * userRegularizationCost + model -> itemRegularizationRate * itemRegularizationCost);
+		
 }
 
 void matrixFactorizationLearn(MatrixFactorization *model, List *ratings){
