@@ -224,6 +224,7 @@ double matrixFactorizationCalculateCost(MatrixFactorization *model, List *rating
 void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings, List *validationRatings){
 	double lastTrainingCost = DBL_MAX;
 	double lastValidationCost = DBL_MAX;
+	bool successfulLearning = false;
 	int trainingRatingCount = listCountEntries(trainingRatings);
 	int validationRatingCount = listCountEntries(validationRatings);
 	double convergenceThreshold = model -> unitConvergenceThreshold * validationRatingCount;
@@ -236,8 +237,11 @@ void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings,
 	matrixInitialize(&newItemMatrix, model -> itemCount, model -> latentFactorCount);
 
 	for(int iteration = 0; iteration < model -> maxSGDIterationCount; iteration ++){
-		matrixCopyEntries(model -> userMatrix, &newUserMatrix);
-		matrixCopyEntries(model -> itemMatrix, &newItemMatrix);
+		if(successfulLearning == false){
+			matrixCopyEntries(model -> userMatrix, &newUserMatrix);
+			matrixCopyEntries(model -> itemMatrix, &newItemMatrix);
+		}
+		
 		matrixFactorizationRunSGDStep(model, trainingRatings, &newUserMatrix, &newItemMatrix);
 
 		double trainingCost = matrixFactorizationCalculateCost(model, trainingRatings, &newUserMatrix, &newItemMatrix);
@@ -254,13 +258,13 @@ void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings,
 
 			model -> learningRate *= model -> learningRateEncouragingRatio;		// raises the learning rate to save learning time
 			lastValidationCost = validationCost;
+			lastTrainingCost = trainingCost;
+			successfulLearning = true;
 		}
 		else{
 			model -> learningRate *= model -> learningRateDiscouragingRatio;	// reduces the learning rate to learn more precisely
-		
-		}
-		
-		lastTrainingCost = trainingCost;
+			successfulLearning = false;	
+		}	
 	}
 	
 	matrixReleaseSpace(&newUserMatrix);
