@@ -8,6 +8,12 @@ This is my own implementation of matrix factorization with cross validation only
 ### Compilation & Running
 Please refer to Makefile.
 
+### Difference between C and Python Code
+
+- Speed: C version is much faster.
+- Readability: It is clearer to understand what the algorithm does in Python.
+- Convergence condition: C code judges the termination of SGD with a split validation data; Python code with the original training data
+
 ### Input Rating File
 - Column 1: user id (variable type "int")
 - Column 2: item id (variable type "int")
