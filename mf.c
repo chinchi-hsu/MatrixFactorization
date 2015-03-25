@@ -177,6 +177,8 @@ typedef struct MATRIX_FACTORIZATION{
 	double learningRateEncouragingRatio;
 	double learningRateDiscouragingRatio;
 	int maxSGDIterationCount;
+	int userCount;
+	int itemCount;
 	Matrix *userMatrix;
 	Matrix *itemMatrix;
 } MatrixFactorization;
@@ -219,47 +221,50 @@ double matrixFactorizationCalculateCost(MatrixFactorization *model, List *rating
 		
 }
 
-void matrixFactorizationLearn(MatrixFactorization *model, List *ratings){
-	double lastTotalCost = DBL_MAX;
-	double totalCost = 0.0;
-	int totalRatingCount = listCountEntries(ratings);
-	double convergenceThreshold = model -> unitConvergenceThreshold * totalRatingCount;
-	Matrix *newUserMatrix = (Matrix*)malloc(sizeof(Matrix));
-	Matrix *newItemMatrix = (Matrix*)malloc(sizeof(Matrix));
-	matrixInitialize(newUserMatrix, model -> userMatrix -> rowCount, model -> userMatrix -> columnCount);
-	matrixInitialize(newItemMatrix, model -> itemMatrix -> rowCount, model -> itemMatrix -> columnCount);
+void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings, List *validationRatings){
+	double lastTrainingCost = DBL_MAX;
+	double lastValidationCost = DBL_MAX;
+	int trainingRatingCount = listCountEntries(trainingRatings);
+	int validationRatingCount = listCountEntries(validationRatings);
+	double convergenceThreshold = model -> unitConvergenceThreshold * validationRatingCount;
 
-	printf("Total %d ratings\n", totalRatingCount);
+	printf("Total %d training ratings, %d validation ratings\n", trainingRatingCount, validationRatingCount);
+
+	Matrix newUserMatrix;
+	Matrix newItemMatrix;
+	matrixInitialize(&newUserMatrix, model -> userCount, model -> latentFactorCount);
+	matrixInitialize(&newItemMatrix, model -> itemCount, model -> latentFactorCount);
 
 	for(int iteration = 0; iteration < model -> maxSGDIterationCount; iteration ++){
-		matrixCopyEntries(model -> userMatrix, newUserMatrix);
-		matrixCopyEntries(model -> itemMatrix, newItemMatrix);
-		matrixFactorizationRunSGDStep(model, ratings, newUserMatrix, newItemMatrix);
+		matrixCopyEntries(model -> userMatrix, &newUserMatrix);
+		matrixCopyEntries(model -> itemMatrix, &newItemMatrix);
+		matrixFactorizationRunSGDStep(model, trainingRatings, &newUserMatrix, &newItemMatrix);
 
-		totalCost = matrixFactorizationCalculateCost(model, ratings, newUserMatrix, newItemMatrix);
-		printf("Iteration %d\tCost %f\tLearningRate %f\tCostDescent %f\tConvergenceThreshold %f\n", iteration + 1, totalCost, model -> learningRate, (lastTotalCost < DBL_MAX) ? lastTotalCost - totalCost : 0.0, convergenceThreshold);	
+		double trainingCost = matrixFactorizationCalculateCost(model, trainingRatings, &newUserMatrix, &newItemMatrix);
+		printf("Iteration %d\tCost %f\tLearningRate %f\tCostDescent %f\tConvergenceThreshold %f\n", iteration + 1, trainingCost, model -> learningRate, (lastTrainingCost < DBL_MAX) ? lastTrainingCost - trainingCost : 0.0, convergenceThreshold);	
 		
-		if(lastTotalCost >= totalCost){				// if this gradient descend does reduce the overall cost
-			matrixCopyEntries(newUserMatrix, model -> userMatrix);
-			matrixCopyEntries(newItemMatrix, model -> itemMatrix);
+		if(lastTrainingCost >= trainingCost){				// if this gradient descend does reduce the overall cost
+			matrixCopyEntries(&newUserMatrix, model -> userMatrix);
+			matrixCopyEntries(&newItemMatrix, model -> itemMatrix);
 			
-			if(iteration >= 1 && lastTotalCost - totalCost < convergenceThreshold){
+			double validationCost = matrixFactorizationCalculateCost(model, validationRatings, &newUserMatrix, &newItemMatrix);
+			if(iteration >= 1 && lastValidationCost - validationCost < convergenceThreshold){
 				break;
 			}
+
 			model -> learningRate *= model -> learningRateEncouragingRatio;		// raises the learning rate to save learning time
+			lastValidationCost = validationCost;
 		}
 		else{
 			model -> learningRate *= model -> learningRateDiscouragingRatio;	// reduces the learning rate to learn more precisely
 		
 		}
 		
-		lastTotalCost = totalCost;
+		lastTrainingCost = trainingCost;
 	}
 	
-	matrixReleaseSpace(newUserMatrix);
-	matrixReleaseSpace(newItemMatrix);
-	free(newUserMatrix);
-	free(newItemMatrix);
+	matrixReleaseSpace(&newUserMatrix);
+	matrixReleaseSpace(&newItemMatrix);
 }
 
 double matrixFactorizationPredict(MatrixFactorization *model, int user, int item){
@@ -323,6 +328,7 @@ typedef struct CROSS_VALIDATION{
 	int foldCount;
 	int evaluationTypeCount;
 	int* evaluationTypes;
+	int trainingFoldCount;
 } CrossValidation;
 
 // Group index [0, groupCount - 1]
@@ -334,7 +340,7 @@ int crossValidationDetermineGroup(int groupCount){
 	return (int)(uniform * groupCount);
 }
 
-void crossValidationGroupRatings(CrossValidation *validation, List *ratings, List *groupMarkers){
+void crossValidationGroupRatings(List *ratings, int foldCount, List *groupMarkers){
 	for(int user = 0; user < ratings -> rowCount; user ++){
 		groupMarkers -> entries[user] = (Dict*)realloc(groupMarkers -> entries[user], sizeof(Dict) * ratings -> columnCounts[user]);
 		groupMarkers -> columnCounts[user] = ratings -> columnCounts[user];
@@ -342,7 +348,7 @@ void crossValidationGroupRatings(CrossValidation *validation, List *ratings, Lis
 		for(int j = 0; j < ratings -> columnCounts[user]; j ++){
 			int item = ratings -> entries[user][j].key;
 			groupMarkers -> entries[user][j].key = item;
-			groupMarkers -> entries[user][j].value = crossValidationDetermineGroup(validation -> foldCount);
+			groupMarkers -> entries[user][j].value = crossValidationDetermineGroup(foldCount);
 		}
 	}
 }
@@ -375,19 +381,30 @@ void crossValidationSplitRatings(List *ratings, List *groupMarkers, List *traini
 void crossValidationRun(CrossValidation *validation, MatrixFactorization *model, List *ratings){
 	List groupMarkers;
 	listInitialize(&groupMarkers, ratings -> rowCount);
-	crossValidationGroupRatings(validation, ratings, &groupMarkers);
+	crossValidationGroupRatings(ratings, validation -> foldCount, &groupMarkers);
+
 	double* performanceMeans = (double*)malloc(sizeof(double) * validation -> evaluationTypeCount);
+	
+	for(int e = 0; e < validation -> evaluationTypeCount; e ++){
+		performanceMeans[e] = 0.0;
+	}
 
 	for(int validedFold = 0; validedFold < validation -> foldCount; validedFold ++){
 		List trainingRatings, validationRatings;
 		listInitialize(&trainingRatings, ratings -> rowCount);
 		listInitialize(&validationRatings, ratings -> rowCount);
-	
 		crossValidationSplitRatings(ratings, &groupMarkers, &trainingRatings, &validationRatings, validedFold);
+
+		List trainingGroupMarkers, trainingTrainRatings, trainingValidRatings;
+		listInitialize(&trainingGroupMarkers, ratings -> rowCount);
+		listInitialize(&trainingTrainRatings, ratings -> rowCount);
+		listInitialize(&trainingValidRatings, ratings -> rowCount);
+		crossValidationGroupRatings(&trainingRatings, validation -> trainingFoldCount, &trainingGroupMarkers);
+		crossValidationSplitRatings(&trainingRatings, &trainingGroupMarkers, &trainingTrainRatings, &trainingValidRatings, 0);
 
 		matrixAssignRandomValues(model -> userMatrix, 0, 1);
 		matrixAssignRandomValues(model -> itemMatrix, 0, 1);
-		matrixFactorizationLearn(model, &trainingRatings);
+		matrixFactorizationLearn(model, &trainingTrainRatings, &trainingValidRatings);
 
 		printf("Cross validation %d\n", validedFold + 1);
 		for(int e = 0; e < validation -> evaluationTypeCount; e ++){	
@@ -398,6 +415,9 @@ void crossValidationRun(CrossValidation *validation, MatrixFactorization *model,
 
 		listReleaseSpace(&trainingRatings);
 		listReleaseSpace(&validationRatings);
+		listReleaseSpace(&trainingGroupMarkers);
+		listReleaseSpace(&trainingTrainRatings);
+		listReleaseSpace(&trainingValidRatings);
 	}
 
 	for(int e = 0; e < validation -> evaluationTypeCount; e ++){	
@@ -434,6 +454,8 @@ int main(int argc, char *argv[]){
 		.maxSGDIterationCount = 5000,
 		.learningRateEncouragingRatio = 1.05,
 		.learningRateDiscouragingRatio = 0.5,
+		.userCount = userCount,
+		.itemCount = itemCount
 	};
 	Matrix userMatrix;
 	Matrix itemMatrix;
@@ -449,7 +471,8 @@ int main(int argc, char *argv[]){
 	// Run cross validation	
 	CrossValidation cv = {
 		.foldCount = 5,
-		.evaluationTypeCount = 2
+		.evaluationTypeCount = 2,
+		.trainingFoldCount = 10
 	};
 	cv.evaluationTypes = (int*)malloc(sizeof(int) * cv.evaluationTypeCount);
 	cv.evaluationTypes[0] = 1;
