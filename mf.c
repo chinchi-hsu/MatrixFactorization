@@ -183,7 +183,9 @@ typedef struct MATRIX_FACTORIZATION{
 	Matrix *itemMatrix;
 } MatrixFactorization;
 
-void matrixFactorizationRunSGDStep(MatrixFactorization *model, List *ratings, Matrix *userMatrix, Matrix *itemMatrix){
+double matrixFactorizationEvaluateRMSE(MatrixFactorization *model, List *ratings);
+
+void matrixFactorizationRunSGDStep(MatrixFactorization *model, List *ratings, Matrix *userMatrix, Matrix *itemMatrix, double learningRate){
 	for(int user = 0; user < ratings -> rowCount; user ++){
 		for(int j = 0; j < ratings -> columnCounts[user]; j ++){
 			int item = ratings -> entries[user][j].key;
@@ -195,8 +197,8 @@ void matrixFactorizationRunSGDStep(MatrixFactorization *model, List *ratings, Ma
 			for(int k = 0; k < model -> latentFactorCount; k ++){
 				double userFactor = userMatrix -> entries[user][k];
 				double itemFactor = itemMatrix -> entries[item][k];
-				userMatrix -> entries[user][k] += model -> learningRate * (ratingError * itemFactor - model -> userRegularizationRate * userFactor);
-				itemMatrix -> entries[item][k] += model -> learningRate * (ratingError * userFactor - model -> itemRegularizationRate * itemFactor);
+				userMatrix -> entries[user][k] += learningRate * (ratingError * itemFactor - model -> userRegularizationRate * userFactor);
+				itemMatrix -> entries[item][k] += learningRate * (ratingError * userFactor - model -> itemRegularizationRate * itemFactor);
 			}
 		}
 	}
@@ -227,10 +229,15 @@ void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings,
 	bool successfulLearning = false;
 	int trainingRatingCount = listCountEntries(trainingRatings);
 	int validationRatingCount = listCountEntries(validationRatings);
-	double convergenceThreshold = model -> unitConvergenceThreshold * validationRatingCount;
+	double learningRate = model -> learningRate;
+	double userRegularizationRate = model -> userRegularizationRate;
+	double itemRegularizationRate = model -> itemRegularizationRate;
 
 	printf("Total %d training ratings, %d validation ratings\n", trainingRatingCount, validationRatingCount);
 
+	matrixAssignRandomValues(model -> userMatrix, 0, 1);
+	matrixAssignRandomValues(model -> itemMatrix, 0, 1);
+	
 	Matrix newUserMatrix;
 	Matrix newItemMatrix;
 	matrixInitialize(&newUserMatrix, model -> userCount, model -> latentFactorCount);
@@ -242,27 +249,27 @@ void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings,
 			matrixCopyEntries(model -> itemMatrix, &newItemMatrix);
 		}
 		
-		matrixFactorizationRunSGDStep(model, trainingRatings, &newUserMatrix, &newItemMatrix);
+		matrixFactorizationRunSGDStep(model, trainingRatings, &newUserMatrix, &newItemMatrix, learningRate);
 
 		double trainingCost = matrixFactorizationCalculateCost(model, trainingRatings, &newUserMatrix, &newItemMatrix);
-		printf("Iteration %d\tCost %f\tLearningRate %f\tCostDescent %f\tConvergenceThreshold %f\n", iteration + 1, trainingCost, model -> learningRate, (lastTrainingCost < DBL_MAX) ? lastTrainingCost - trainingCost : 0.0, convergenceThreshold);	
+		printf("Iteration %d\tCost %f\tLearningRate %f\tCostDescent %f\n", iteration + 1, trainingCost, learningRate, (lastTrainingCost < DBL_MAX) ? lastTrainingCost - trainingCost : 0.0);	
 		
 		if(lastTrainingCost >= trainingCost){				// if this gradient descend does reduce the overall cost
 			matrixCopyEntries(&newUserMatrix, model -> userMatrix);
 			matrixCopyEntries(&newItemMatrix, model -> itemMatrix);
 			
-			double validationCost = matrixFactorizationCalculateCost(model, validationRatings, &newUserMatrix, &newItemMatrix);
-			if(iteration >= 1 && lastValidationCost - validationCost < convergenceThreshold){
+			double validationCost = matrixFactorizationEvaluateRMSE(model, validationRatings);
+			if(iteration > 0 && lastValidationCost - validationCost < 0){
 				break;
 			}
 
-			model -> learningRate *= model -> learningRateEncouragingRatio;		// raises the learning rate to save learning time
+			learningRate *= model -> learningRateEncouragingRatio;		// raises the learning rate to save learning time
 			lastValidationCost = validationCost;
 			lastTrainingCost = trainingCost;
 			successfulLearning = true;
 		}
 		else{
-			model -> learningRate *= model -> learningRateDiscouragingRatio;	// reduces the learning rate to learn more precisely
+			learningRate *= model -> learningRateDiscouragingRatio;	// reduces the learning rate to learn more precisely
 			successfulLearning = false;	
 		}	
 	}
@@ -406,8 +413,6 @@ void crossValidationRun(CrossValidation *validation, MatrixFactorization *model,
 		crossValidationGroupRatings(&trainingRatings, validation -> trainingFoldCount, &trainingGroupMarkers);
 		crossValidationSplitRatings(&trainingRatings, &trainingGroupMarkers, &trainingTrainRatings, &trainingValidRatings, 0);
 
-		matrixAssignRandomValues(model -> userMatrix, 0, 1);
-		matrixAssignRandomValues(model -> itemMatrix, 0, 1);
 		matrixFactorizationLearn(model, &trainingTrainRatings, &trainingValidRatings);
 
 		printf("Cross validation %d\n", validedFold + 1);
@@ -467,8 +472,6 @@ int main(int argc, char *argv[]){
 	matrixInitialize(&itemMatrix, itemCount, mf.latentFactorCount);
 	printf("User matrix %d %d\n", userMatrix.rowCount, userMatrix.columnCount);
 	printf("Item matrix %d %d\n", itemMatrix.rowCount, itemMatrix.columnCount);
-	matrixAssignRandomValues(&userMatrix, 0, 1);
-	matrixAssignRandomValues(&itemMatrix, 0, 1);
 	mf.userMatrix = &userMatrix;
 	mf.itemMatrix = &itemMatrix;	
 
