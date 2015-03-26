@@ -230,8 +230,6 @@ void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings,
 	int trainingRatingCount = listCountEntries(trainingRatings);
 	int validationRatingCount = listCountEntries(validationRatings);
 	double learningRate = model -> learningRate;
-	double userRegularizationRate = model -> userRegularizationRate;
-	double itemRegularizationRate = model -> itemRegularizationRate;
 
 	printf("Total %d training ratings, %d validation ratings\n", trainingRatingCount, validationRatingCount);
 
