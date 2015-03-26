@@ -224,18 +224,20 @@ double matrixFactorizationCalculateCost(MatrixFactorization *model, List *rating
 }
 
 void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings, List *validationRatings){
-	double lastTrainingCost = DBL_MAX;
-	double lastValidationCost = DBL_MAX;
-	bool successfulLearning = false;
 	int trainingRatingCount = listCountEntries(trainingRatings);
 	int validationRatingCount = listCountEntries(validationRatings);
-	double learningRate = model -> learningRate;
+	double convergenceThreshold = model -> unitConvergenceThreshold * trainingRatingCount;
 
 	printf("Total %d training ratings, %d validation ratings\n", trainingRatingCount, validationRatingCount);
 
 	matrixAssignRandomValues(model -> userMatrix, 0, 1);
 	matrixAssignRandomValues(model -> itemMatrix, 0, 1);
 	
+	double learningRate = model -> learningRate;
+	double lastTrainingCost = DBL_MAX;
+	double lastValidationCost = DBL_MAX;
+	bool successfulLearning = false;
+
 	Matrix newUserMatrix;
 	Matrix newItemMatrix;
 	matrixInitialize(&newUserMatrix, model -> userCount, model -> latentFactorCount);
@@ -250,14 +252,14 @@ void matrixFactorizationLearn(MatrixFactorization *model, List *trainingRatings,
 		matrixFactorizationRunSGDStep(model, trainingRatings, &newUserMatrix, &newItemMatrix, learningRate);
 
 		double trainingCost = matrixFactorizationCalculateCost(model, trainingRatings, &newUserMatrix, &newItemMatrix);
-		printf("Iteration %d\tCost %f\tLearningRate %f\tCostDescent %f\n", iteration + 1, trainingCost, learningRate, (lastTrainingCost < DBL_MAX) ? lastTrainingCost - trainingCost : 0.0);	
+		printf("Iteration %d\tCost %f\tLearningRate %f\tCostDescent %f\tConvergenceThreshold %f\n", iteration + 1, trainingCost, learningRate, (lastTrainingCost < DBL_MAX) ? lastTrainingCost - trainingCost : 0.0, convergenceThreshold);	
 		
 		if(lastTrainingCost >= trainingCost){				// if this gradient descend does reduce the overall cost
 			matrixCopyEntries(&newUserMatrix, model -> userMatrix);
 			matrixCopyEntries(&newItemMatrix, model -> itemMatrix);
 			
 			double validationCost = matrixFactorizationEvaluateRMSE(model, validationRatings);
-			if(iteration > 0 && lastValidationCost - validationCost < 0){
+			if(iteration > 0 && (lastValidationCost - validationCost < 0 || lastTrainingCost - trainingCost < convergenceThreshold)){
 				break;
 			}
 
